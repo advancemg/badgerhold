@@ -7,6 +7,7 @@ package badgerhold
 import (
 	"errors"
 	"reflect"
+	"time"
 
 	"github.com/dgraph-io/badger/v3"
 )
@@ -110,6 +111,82 @@ func (s *Store) TxInsert(tx *badger.Txn, key, data interface{}) error {
 	return nil
 }
 
+// InsertTTL inserts the passed in data into the the badgerhold with TTL
+func (s *Store) InsertTTL(key, data interface{}, ttl time.Duration) error {
+	err := s.Badger().Update(func(tx *badger.Txn) error {
+		return s.TxInsertTTL(tx, key, data, ttl)
+	})
+
+	if err == badger.ErrConflict {
+		return s.InsertTTL(key, data, ttl)
+	}
+	return err
+}
+
+// TxInsertTTL is the same as InsertTTL except it allows you specify your own transaction with TTL
+func (s *Store) TxInsertTTL(tx *badger.Txn, key, data interface{}, ttl time.Duration) error {
+	storer := s.newStorer(data)
+	var err error
+
+	if _, ok := key.(sequence); ok {
+		key, err = s.getSequence(storer.Type())
+		if err != nil {
+			return err
+		}
+	}
+
+	gk, err := s.encodeKey(key, storer.Type())
+
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Get(gk)
+	if err != badger.ErrKeyNotFound {
+		return ErrKeyExists
+	}
+
+	value, err := s.encode(data)
+	if err != nil {
+		return err
+	}
+
+	// insert data
+	e := badger.NewEntry(gk, value).WithTTL(ttl)
+	err = tx.SetEntry(e)
+	if err != nil {
+		return err
+	}
+
+	// insert any indexes
+	err = s.indexAdd(storer, tx, gk, data)
+	if err != nil {
+		return err
+	}
+
+	dataVal := reflect.Indirect(reflect.ValueOf(data))
+	if !dataVal.CanSet() {
+		return nil
+	}
+
+	if keyField, ok := getKeyField(dataVal.Type()); ok {
+		fieldValue := dataVal.FieldByName(keyField.Name)
+		keyValue := reflect.ValueOf(key)
+		if keyValue.Type() != keyField.Type {
+			return nil
+		}
+		if !fieldValue.CanSet() {
+			return nil
+		}
+		if !reflect.DeepEqual(fieldValue.Interface(), reflect.Zero(keyField.Type).Interface()) {
+			return nil
+		}
+		fieldValue.Set(keyValue)
+	}
+
+	return nil
+}
+
 // Update updates an existing record in the badgerhold
 // if the Key doesn't already exist in the store, then it fails with ErrNotFound
 func (s *Store) Update(key interface{}, data interface{}) error {
@@ -169,6 +246,65 @@ func (s *Store) TxUpdate(tx *badger.Txn, key interface{}, data interface{}) erro
 	return s.indexAdd(storer, tx, gk, data)
 }
 
+// UpdateTTL updates an existing record in the badgerhold with TTL
+func (s *Store) UpdateTTL(key interface{}, data interface{}, ttl time.Duration) error {
+	err := s.Badger().Update(func(tx *badger.Txn) error {
+		return s.TxUpdateTTL(tx, key, data, ttl)
+	})
+	if err == badger.ErrConflict {
+		return s.UpdateTTL(key, data, ttl)
+	}
+	return err
+}
+
+// TxUpdate is the same as Update except it allows you to specify your own transaction
+func (s *Store) TxUpdateTTL(tx *badger.Txn, key interface{}, data interface{}, ttl time.Duration) error {
+	storer := s.newStorer(data)
+
+	gk, err := s.encodeKey(key, storer.Type())
+
+	if err != nil {
+		return err
+	}
+
+	existingItem, err := tx.Get(gk)
+	if err == badger.ErrKeyNotFound {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	// delete any existing indexes
+	existingVal := newElemType(data)
+
+	err = existingItem.Value(func(existing []byte) error {
+		return s.decode(existing, existingVal)
+	})
+	if err != nil {
+		return err
+	}
+	err = s.indexDelete(storer, tx, gk, existingVal)
+	if err != nil {
+		return err
+	}
+
+	value, err := s.encode(data)
+	if err != nil {
+		return err
+	}
+
+	// put data
+	e := badger.NewEntry(gk, value).WithTTL(ttl)
+	err = tx.SetEntry(e)
+	if err != nil {
+		return err
+	}
+
+	// insert any new indexes
+	return s.indexAdd(storer, tx, gk, data)
+}
+
 // Upsert inserts the record into the badgerhold if it doesn't exist.  If it does already exist, then it updates
 // the existing record
 func (s *Store) Upsert(key interface{}, data interface{}) error {
@@ -185,7 +321,6 @@ func (s *Store) Upsert(key interface{}, data interface{}) error {
 // TxUpsert is the same as Upsert except it allows you to specify your own transaction
 func (s *Store) TxUpsert(tx *badger.Txn, key interface{}, data interface{}) error {
 	storer := s.newStorer(data)
-
 	gk, err := s.encodeKey(key, storer.Type())
 
 	if err != nil {
@@ -223,6 +358,68 @@ func (s *Store) TxUpsert(tx *badger.Txn, key interface{}, data interface{}) erro
 
 	// put data
 	err = tx.Set(gk, value)
+	if err != nil {
+		return err
+	}
+
+	// insert any new indexes
+	return s.indexAdd(storer, tx, gk, data)
+}
+
+// UpsertTTL inserts the record into the badgerhold if it doesn't exist.  If it does already exist, then it updates
+// the existing record. With TTL.
+func (s *Store) UpsertTTL(key interface{}, data interface{}, ttl time.Duration) error {
+	err := s.Badger().Update(func(tx *badger.Txn) error {
+		return s.TxUpsertTTL(tx, key, data, ttl)
+	})
+
+	if err == badger.ErrConflict {
+		return s.UpsertTTL(key, data, ttl)
+	}
+	return err
+}
+
+// TxUpsertTTL is the same as Upsert except it allows you to specify your own transaction with TTL
+func (s *Store) TxUpsertTTL(tx *badger.Txn, key interface{}, data interface{}, ttl time.Duration) error {
+	storer := s.newStorer(data)
+	gk, err := s.encodeKey(key, storer.Type())
+
+	if err != nil {
+		return err
+	}
+
+	existingItem, err := tx.Get(gk)
+
+	if err == nil {
+		// existing entry found
+		// delete any existing indexes
+		existingVal := newElemType(data)
+
+		err = existingItem.Value(func(existing []byte) error {
+			return s.decode(existing, existingVal)
+		})
+		if err != nil {
+			return err
+		}
+
+		err = s.indexDelete(storer, tx, gk, existingVal)
+		if err != nil {
+			return err
+		}
+	} else if err != badger.ErrKeyNotFound {
+		return err
+	}
+
+	// existing entry not found
+
+	value, err := s.encode(data)
+	if err != nil {
+		return err
+	}
+
+	// put data
+	e := badger.NewEntry(gk, value).WithTTL(ttl)
+	err = tx.SetEntry(e)
 	if err != nil {
 		return err
 	}

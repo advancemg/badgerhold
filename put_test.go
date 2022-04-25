@@ -197,6 +197,93 @@ func TestUpsert(t *testing.T) {
 	})
 }
 
+func TestUpsertTTL(t *testing.T) {
+	testWrap(t, func(store *badgerhold.Store, t *testing.T) {
+		key := "testKey"
+		data := &ItemTest{
+			Name:     "Test Name",
+			Category: "Test Category",
+			Created:  time.Now(),
+		}
+		err := store.UpsertTTL(key, data, 1*time.Second)
+		if err != nil {
+			t.Fatalf("Error upserting data: %s", err)
+		}
+		result := &ItemTest{}
+		err = store.Get(key, result)
+		if err != nil {
+			t.Fatalf("Error getting data from badgerhold: %s", err)
+		}
+		if !data.equal(result) {
+			t.Fatalf("Got %v wanted %v.", result, data)
+		}
+
+		time.Sleep(3 * time.Second)
+
+		err = store.Get(key, result)
+		if err != nil {
+			if errors.Is(err, badgerhold.ErrNotFound) {
+				return
+			}
+		}
+	})
+}
+
+func TestUpdateTTL(t *testing.T) {
+	testWrap(t, func(store *badgerhold.Store, t *testing.T) {
+		key := "testKey"
+		data := &ItemTest{
+			Name:     "Test Name",
+			Category: "Test Category",
+			Created:  time.Now(),
+		}
+
+		err := store.Insert(key, data)
+		if err != nil {
+			t.Fatalf("Error creating data for update test: %s", err)
+		}
+
+		err = store.UpdateTTL(key, data, 1*time.Second)
+		if err != nil {
+			t.Fatalf("Error creating data for update test: %s", err)
+		}
+
+		time.Sleep(time.Second * 2)
+
+		result := &ItemTest{}
+		err = store.Get(key, result)
+		if err != nil {
+			if errors.Is(err, badgerhold.ErrNotFound) {
+				return
+			}
+		}
+	})
+}
+
+func TestInsertTTL(t *testing.T) {
+	testWrap(t, func(store *badgerhold.Store, t *testing.T) {
+		key := "testKey"
+		data := &ItemTest{
+			Name:     "Test Name",
+			Category: "Test Category",
+			Created:  time.Now(),
+		}
+
+		err := store.InsertTTL(key, data, 1*time.Second)
+		if err != nil {
+			t.Fatalf("Error inserting data for test: %s", err)
+		}
+		time.Sleep(3 * time.Second)
+		result := &ItemTest{}
+		err = store.Get(key, result)
+		if err != nil {
+			if errors.Is(err, badgerhold.ErrNotFound) {
+				return
+			}
+		}
+	})
+}
+
 func TestUpsertReadTxn(t *testing.T) {
 	testWrap(t, func(store *badgerhold.Store, t *testing.T) {
 		key := "testKey"
