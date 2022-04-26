@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/timshannon/badgerhold/v4"
+	"github.com/advancemg/badgerhold"
 )
 
 func TestForEach(t *testing.T) {

@@ -5,10 +5,9 @@
 package badgerhold_test
 
 import (
+	"github.com/advancemg/badgerhold"
 	"reflect"
 	"testing"
-
-	"github.com/timshannon/badgerhold/v4"
 )
 
 type Nested struct {

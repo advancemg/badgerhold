@@ -257,7 +257,7 @@ func (s *Store) UpdateTTL(key interface{}, data interface{}, ttl time.Duration) 
 	return err
 }
 
-// TxUpdate is the same as Update except it allows you to specify your own transaction
+// TxUpdateTTL is the same as UpdateTTL except it allows you to specify your own transaction
 func (s *Store) TxUpdateTTL(tx *badger.Txn, key interface{}, data interface{}, ttl time.Duration) error {
 	storer := s.newStorer(data)
 
