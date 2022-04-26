@@ -7,13 +7,13 @@ package badgerhold_test
 import (
 	"encoding/binary"
 	"encoding/json"
+	"github.com/advancemg/badgerhold"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"testing"
 
 	"github.com/dgraph-io/badger/v3"
-	"github.com/timshannon/badgerhold/v4"
 )
 
 type BenchData struct {

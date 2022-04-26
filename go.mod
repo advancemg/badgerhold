@@ -4,8 +4,6 @@ go 1.17
 
 require (
 	github.com/dgraph-io/badger/v3 v3.2103.2
-	github.com/timshannon/badgerhold/v3 v3.0.0
-	github.com/timshannon/badgerhold/v4 v4.0.2
 )
 
 require (
